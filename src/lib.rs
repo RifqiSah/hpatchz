@@ -1,0 +1,99 @@
+use std::{fs::{self, File}, io::{Read as _, Seek as _, SeekFrom, Write}, path::PathBuf, process::{Command, Stdio}};
+
+const HOYO_HPATCHZ_EXE: &[u8] = include_bytes!("./hpatchz/hoyo_hpatchz.exe");
+const KURO_HPATCHZ_EXE: &[u8] = include_bytes!("./hpatchz/kuro_hpatchz.exe");
+
+pub struct HPatchz {
+  pub extracted_path: PathBuf,
+}
+
+pub enum HPatchzType {
+  Hoyo,
+  Kuro,
+}
+
+impl HPatchz {
+  pub fn new(e_type: HPatchzType) -> Self {
+    let temp_path = std::env::temp_dir().join("hpatchz.tmp");
+    if !temp_path.exists() {
+      let mut temp_file = File::create(&temp_path).expect("[hpatchz] Error creating temp file!");
+      temp_file.write_all(match e_type {
+        HPatchzType::Hoyo => HOYO_HPATCHZ_EXE,
+        HPatchzType::Kuro => KURO_HPATCHZ_EXE,
+      }).expect("[hpatchz] Error writing temp file data!");
+      temp_file.flush().unwrap();
+      drop(temp_file);
+    }
+
+    HPatchz {
+      extracted_path: temp_path,
+    }
+  }
+
+  pub fn drop(&self) {
+    fs::remove_file(&self.extracted_path).expect("[hpatchz] Unable to delete temp file!");
+  }
+
+  pub fn patch(&self, src_path: &PathBuf, dest_path: &PathBuf, diff_file: &PathBuf) -> i32 {
+    let args = [
+      &src_path.to_string_lossy(),
+      &diff_file.to_string_lossy(),
+      &dest_path.to_string_lossy(),
+      "-f",
+    ];
+
+    tracing::debug!("[hpatchz] With args: {:?}", args);
+
+    let mut child = Command::new(&self.extracted_path)
+      .args(&args)
+      .stdout(Stdio::null())
+      .stderr(Stdio::null())
+      .spawn()
+      .expect("[hpatchz] Unable to run hpatchz!");
+
+    let status = child.wait().expect("[hpatchz] Unable to wait process to complete!");
+    tracing::debug!("[hpatchz] Exit status: {:?}", status);
+
+    match status.code() {
+      Some(c) => c,
+      None => {
+        tracing::debug!("[hpatchz] Was killed by signal!");
+        -99
+      },
+    }
+  }
+
+  pub fn patch_legacy(&self, src: &str, dest: &str, diff: &str) -> i32 {
+    self.patch(&PathBuf::from(src), &PathBuf::from(dest), &PathBuf::from(diff))
+  }
+  
+  pub fn patch_offset(&self, src_path: &PathBuf, dest_path: &PathBuf, diff_file: &PathBuf, start_offset: u64, patch_size: u64) -> i32 {
+    let mut ldiff = File::open(diff_file).unwrap();
+    ldiff.seek(SeekFrom::Start(start_offset)).unwrap(); // seek to start offset
+
+    tracing::debug!("[hpatchz] Init new patch for offset {} - {} from {}", start_offset, patch_size, diff_file.display());
+
+    // init buffer
+    let mut ldiff_buffer = vec![0u8; patch_size as usize];
+    let ldiff_bytes = ldiff.read(&mut ldiff_buffer).unwrap();
+
+    // init filename
+    let diff_file_name = diff_file.file_name().unwrap().to_str().unwrap().to_string();
+    let ldiff_temp_path = dest_path.join(format!("{}_{}_{}.diff", diff_file_name, start_offset, patch_size));
+
+    // start writing diff with offset to temp file
+    let mut ldiff_temp_file = File::create(&ldiff_temp_path).expect("[hpatchz] Unable to create diff patch offset!");
+    ldiff_temp_file.write_all(&ldiff_buffer[..ldiff_bytes]).expect("[hpatchz] Unable to write diff patch offset!");
+    drop(ldiff_temp_file);
+
+    tracing::debug!("[hpatchz] Diff patch is writen to {}", ldiff_temp_path.display());
+
+    let retcode = self.patch(src_path, dest_path, &ldiff_temp_path);
+
+    // delete temp file
+    tracing::debug!("[hpatchz] Removing {}", ldiff_temp_path.display());
+    fs::remove_file(ldiff_temp_path).expect("[hpatchz] Unable to delete diff patch offset!");
+
+    retcode
+  }
+}
