@@ -1,9 +1,10 @@
-use std::{fs::{self, File}, io::{Read as _, Seek as _, SeekFrom, Write}, path::PathBuf, process::{Command, Stdio}};
+use std::{fs::{self, File}, io::{BufRead as _, BufReader, Read as _, Seek as _, SeekFrom, Write}, path::PathBuf, process::{Command, Stdio}};
 
 const HOYO_HPATCHZ_EXE: &[u8] = include_bytes!("./hpatchz/hoyo_hpatchz.exe");
 const KURO_HPATCHZ_EXE: &[u8] = include_bytes!("./hpatchz/kuro_hpatchz.exe");
 
 pub struct HPatchz {
+  pub e_type: HPatchzType,
   pub extracted_path: PathBuf,
   pub custom_args: Vec<String>,
 }
@@ -11,6 +12,13 @@ pub struct HPatchz {
 pub enum HPatchzType {
   Hoyo,
   Kuro,
+}
+
+fn allowed_print(line: &str) -> bool {
+  !line.trim().is_empty()
+    && (line.contains("Patch inited")
+    || line.contains("begin patch file")
+    || line.contains("end patch file"))
 }
 
 impl HPatchz {
@@ -27,6 +35,7 @@ impl HPatchz {
     }
 
     HPatchz {
+      e_type: e_type,
       extracted_path: temp_path,
       custom_args: args,
     }
@@ -52,11 +61,33 @@ impl HPatchz {
 
     let mut child = Command::new(&self.extracted_path)
       .args(&args)
-      .stdout(Stdio::null())
-      .stderr(Stdio::null())
+      .stdout(Stdio::piped())
+      .stderr(Stdio::piped())
       .spawn()
       .expect("[hpatchz] Unable to run hpatchz!");
 
+    if let Some(stdout) = child.stdout.take() {
+      std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+          let line = line.unwrap();
+          let trimmed = line.trim();
+
+          if !trimmed.is_empty() && allowed_print(trimmed) {
+            tracing::info!("[hpatchz] out : {}", trimmed);
+          }
+        }
+      });
+    }
+
+    if let Some(stderr) = child.stderr.take() {
+      let reader = BufReader::new(stderr);
+      for line in reader.lines() {
+        let line = line.unwrap();
+        tracing::warn!("[hpatchz] err: {}", line);
+      }
+    }
+    
     let status = child.wait().expect("[hpatchz] Unable to wait process to complete!");
     tracing::debug!("[hpatchz] Exit status: {:?}", status);
 
