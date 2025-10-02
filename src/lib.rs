@@ -5,6 +5,7 @@ const KURO_HPATCHZ_EXE: &[u8] = include_bytes!("./hpatchz/kuro_hpatchz.exe");
 
 pub struct HPatchz {
   pub extracted_path: PathBuf,
+  pub custom_args: Vec<String>,
 }
 
 pub enum HPatchzType {
@@ -13,7 +14,7 @@ pub enum HPatchzType {
 }
 
 impl HPatchz {
-  pub fn new(e_type: HPatchzType) -> Self {
+  pub fn new(e_type: HPatchzType, args: Vec<String>) -> Self {
     let temp_path = std::env::temp_dir().join("hpatchz.tmp");
     if !temp_path.exists() {
       let mut temp_file = File::create(&temp_path).expect("[hpatchz] Error creating temp file!");
@@ -27,6 +28,7 @@ impl HPatchz {
 
     HPatchz {
       extracted_path: temp_path,
+      custom_args: args,
     }
   }
 
@@ -35,12 +37,16 @@ impl HPatchz {
   }
 
   pub fn patch(&self, src_path: &PathBuf, dest_path: &PathBuf, diff_file: &PathBuf) -> i32 {
-    let args = [
-      &src_path.to_string_lossy(),
-      &diff_file.to_string_lossy(),
-      &dest_path.to_string_lossy(),
-      "-f",
-    ];
+    let mut args: Vec<String> = Vec::new();
+
+    args.push(src_path.to_string_lossy().to_string());
+    args.push(diff_file.to_string_lossy().to_string());
+    args.push(dest_path.to_string_lossy().to_string());
+
+    args.push("-f".to_string());
+
+    // custom args
+    args.extend(self.custom_args.iter().cloned());
 
     tracing::debug!("[hpatchz] With args: {:?}", args);
 
