@@ -1,7 +1,7 @@
-use std::{fs::{self, File}, io::{BufRead as _, BufReader, Read as _, Seek as _, SeekFrom, Write}, path::PathBuf, process::{Command, Stdio}};
+use std::{fs::{self, File}, io::{BufRead as _, BufReader, Read as _, Seek as _, SeekFrom, Write}, path::PathBuf, process::{Command, Stdio}, thread};
 
-const HOYO_HPATCHZ_EXE: &[u8] = include_bytes!("./hpatchz/hoyo_hpatchz.exe");
-const KURO_HPATCHZ_EXE: &[u8] = include_bytes!("./hpatchz/kuro_hpatchz.exe");
+const HOYO_HPATCHZ_EXE: &[u8] = include_bytes!("./hpatchz/hpatchz_4.6.9.exe");
+const KURO_HPATCHZ_EXE: &[u8] = include_bytes!("./hpatchz/hpatchz_4.8.0.exe");
 
 pub struct HPatchz {
   pub e_type: HPatchzType,
@@ -67,7 +67,7 @@ impl HPatchz {
       .expect("[hpatchz] Unable to run hpatchz!");
 
     if let Some(stdout) = child.stdout.take() {
-      std::thread::spawn(move || {
+      thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
           let line = line.unwrap();
@@ -81,11 +81,13 @@ impl HPatchz {
     }
 
     if let Some(stderr) = child.stderr.take() {
-      let reader = BufReader::new(stderr);
-      for line in reader.lines() {
-        let line = line.unwrap();
-        tracing::warn!("[hpatchz] err: {}", line);
-      }
+      thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+          let line = line.unwrap();
+          tracing::warn!("[hpatchz] err: {}", line);
+        }
+      });
     }
     
     let status = child.wait().expect("[hpatchz] Unable to wait process to complete!");
