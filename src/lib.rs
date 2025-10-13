@@ -117,8 +117,9 @@ impl HPatchz {
     let ldiff_bytes = ldiff.read(&mut ldiff_buffer).unwrap();
 
     // init filename
+    let parent_diff = diff_file.parent().unwrap(); // ldiff folder
     let diff_file_name = diff_file.file_name().unwrap().to_str().unwrap().to_string();
-    let ldiff_temp_path = dest_path.join(format!("{}_{}_{}.diff", diff_file_name, start_offset, patch_size));
+    let ldiff_temp_path = parent_diff.join(format!("{}_{}_{}.diff", diff_file_name, start_offset, patch_size));
 
     // start writing diff with offset to temp file
     let mut ldiff_temp_file = File::create(&ldiff_temp_path).expect("[hpatchz] Unable to create diff patch offset!");
